@@ -1,0 +1,138 @@
+name: build-openwrt
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    # 每日检查 openwrt/openwrt 的最新稳定发布（你可以修改 cron）
+    - cron: '0 2 * * *'
+
+jobs:
+  check-latest:
+    runs-on: ubuntu-latest
+    outputs:
+      OPENWRT_TAG: ${{ steps.set.outputs.OPENWRT_TAG }}
+      SKIP_BUILD: ${{ steps.set.outputs.SKIP_BUILD }}
+    steps:
+      - name: Set up
+        id: set
+        run: |
+          # 获取事件类型
+          echo "EVENT=${GITHUB_EVENT_NAME}" >> $GITHUB_ENV
+          # 获取 openwrt/openwrt 的最新发布 tag（使用 GitHub API）
+          LATEST_TAG=$(curl -s "https://api.github.com/repos/openwrt/openwrt/releases" | jq -r 'map(select(.prerelease==false)) | .[0].tag_name')
+          if [ -z "$LATEST_TAG" ] ; then
+            # 回退到公开分支主分支（例如 master 或 openwrt-23.05）
+            LATEST_TAG="openwrt-23.05"
+          fi
+          echo "LATEST_TAG=${LATEST_TAG}" >> $GITHUB_ENV
+          # 若是 schedule 触发，比较本仓库记录版本（若文件不存在则不跳过）
+          SKIP="false"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+            if [ -f openwrt/LAST_OPENWRT_TAG ]; then
+              PREV_TAG=$(cat openwrt/LAST_OPENWRT_TAG)
+              if [ "$PREV_TAG" = "$LATEST_TAG" ]; then
+                SKIP="true"
+              fi
+            fi
+          fi
+          # 将值作为 outputs
+          echo "OPENWRT_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "SKIP_BUILD=$SKIP" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-latest
+    if: needs.check-latest.outputs.SKIP_BUILD != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    env:
+      OPENWRT_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up QEMU (for running containers with different archs)
+        uses: docker/setup-qemu-action@v2
+      - name: Build Docker image for builder
+        run: |
+          docker build -t openwrt-builder:latest docker
+      - name: Create output dir
+        run: mkdir -p artifacts/${{ matrix.arch }}
+      - name: Run build in Docker
+        env:
+          ARCH: ${{ matrix.arch }}
+          OPENWRT_TAG: ${{ env.OPENWRT_TAG }}
+        run: |
+          set -e
+          docker run --rm \
+            -e ARCH=${ARCH} -e OPENWRT_TAG=${OPENWRT_TAG} \
+            -v "${{ github.workspace }}":/work -w /work openwrt-builder:latest \
+            bash -l -c "./scripts/build-openwrt.sh ${ARCH} ${OPENWRT_TAG} artifacts/${ARCH}"
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ matrix.arch }}-${{ env.OPENWRT_TAG }}
+          path: artifacts/${{ matrix.arch }}/*
+
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: needs.check-latest.outputs.SKIP_BUILD != 'true'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Download artifacts (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: openwrt-x86_64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          path: ./release_assets/x86_64 || true
+      - name: Download artifacts (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: openwrt-aarch64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          path: ./release_assets/aarch64 || true
+      - name: Create or update GitHub Release
+        id: ghrel
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          name: OpenWrt ${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          body: |
+            Automated OpenWrt builds for ${{ needs.check-latest.outputs.OPENWRT_TAG }}.
+            包含平台: x86_64, aarch64（按需求添加）。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload release assets (x86_64)
+        if: always()
+        run: |
+          for f in release_assets/x86_64/* || true; do
+            [ -f "$f" ] || continue
+            gh release upload "${{ needs.check-latest.outputs.OPENWRT_TAG }}" "$f" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload release assets (aarch64)
+        if: always()
+        run: |
+          for f in release_assets/aarch64/* || true; do
+            [ -f "$f" ] || continue
+            gh release upload "${{ needs.check-latest.outputs.OPENWRT_TAG }}" "$f" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Save latest tag (commit LAST_OPENWRT_TAG)
+        if: ${{ github.event_name == 'schedule' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "${{ needs.check-latest.outputs.OPENWRT_TAG }}" > openwrt/LAST_OPENWRT_TAG
+          git add openwrt/LAST_OPENWRT_TAG
+          git commit -m "ci: update LAST_OPENWRT_TAG to ${{ needs.check-latest.outputs.OPENWRT_TAG }}" || echo "no change"
+          git push origin HEAD:main || echo "push failed"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
