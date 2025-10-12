@@ -1,0 +1,16 @@
+# package-list.txt: 每行一个包名，# 开头为注释
+# 以下为示例插件，请按需修改、添加或删除
+
+luci
+luci-ssl
+openssh-sftp-server
+htop
+iptables-mod-tproxy
+kmod-sched-cake
+luci-app-adblock
+luci-app-openvpn
+vpn-policy-routing
+mwan3
+curl
+wget
+curl-ca-bundle

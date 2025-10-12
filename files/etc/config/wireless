@@ -1,0 +1,17 @@
+# files/etc/config/wireless
+# 示例：默认关闭无线。如果需要启用，请修改 option disabled '0'
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option hwmode '11n'
+	option channel '11'
+	option path 'platform/ahb/18100000.wmac'
+	option htmode 'HT20'
+	option disabled '1' # 1 表示禁止无线，改为 0 则启用
+
+config wifi-iface
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'OpenWrt'
+	option encryption 'psk2'
+	option key 'changeme'

@@ -1,0 +1,8 @@
+# files/etc/config/dropbear
+# dropbear ssh 服务配置模板（不要在仓库中写入私钥或明文密码）
+config dropbear
+	option PasswordAuth 'on'
+	option RootPasswordAuth 'off'
+	# 设置监听 IP：如果你只想允许局域网访问，可以设置为 '192.168.1.1'
+	option Interface 'lan'
+	option Port '22'
