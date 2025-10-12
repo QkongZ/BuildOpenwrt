@@ -1,30 +1,24 @@
-# Dockerfile: 用于在容器内完整构建 OpenWrt 的基础环境
+# Dockerfile（用于把 OpenWrt rootfs 放进容器以便运行 OpenWrt 用户空间）
+# 用法示例：
+#   docker build -t openwrt-run:latest --build-arg ROOTFS=./rootfs_contents .
+#
+# 注意：
+# - 该镜像基于 Ubuntu/Alpine 只是为了简单示例；OpenWrt 使用自己的 init (procd)，
+#   在容器中能否完全工作取决于内核和所需功能（例如某些内核模块、网络命名空间、无线驱动等在容器中不可用）。
+# - 运行此镜像时通常需要额外的特权和绑定主机网络，例如 --privileged 或 --cap-add=NET_ADMIN 以及 --network host。
 FROM ubuntu:22.04
 
-ARG DEBIAN_FRONTEND=noninteractive
+ARG ROOTFS=./rootfs_contents
 
-# 常见编译依赖
+# 安装必要工具（可根据需要移除以减小镜像）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gcc g++ binutils patch bzip2 gzip gawk gettext git subversion flex \
-    curl unzip file libncurses5-dev zlib1g-dev libssl-dev python3-distutils python3 \
-    python3-pip ca-certificates ccache rsync bzr make wget jq \
+    ca-certificates dbus procps iproute2 iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 repo（非必须），和一些工具
-RUN pip3 install --no-cache-dir ==
+# 将 rootfs 内容拷贝到容器根
+COPY ${ROOTFS}/ / 
 
-# 安装 gh CLI（用于 release 上传也可用）
-RUN apt-get update && apt-get install -y --no-install-recommends gnupg2 dirmngr \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y gh
-
-# 创建工作目录
-WORKDIR /work
-
-# 减小镜像层：清理apt缓存
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 默认 entrypoint（你也可以把脚本直接传入 docker run）
-ENTRYPOINT ["/bin/bash", "-l", "-c"]
+# 默认使用 OpenWrt 的 init（通常为 /sbin/init 或 /sbin/procd）
+# 如果不存在，可以以 /bin/sh 启动用于调试
+ENTRYPOINT ["/sbin/init"]
+CMD ["/bin/sh"]

@@ -1,16 +1,71 @@
-# package-list.txt: 每行一个包名，# 开头为注释
-# 以下为示例插件，请按需修改、添加或删除
+# 下面为来自你的包清单，已保留中文注释（每行第一个字段为包名，# 开头为注释）
+# 系统管理
+luci-app-argon-config          # Argon主题设置（已安装）
+luci-app-filebrowser           # 文件管理器（已安装）
+luci-app-attendedsysupgrade    # 值守式系统更新（已安装）
+luci-app-cpufreq               # CPU频率调节
+luci-app-ramfree               # 释放内存（已安装）
 
-luci
-luci-ssl
-openssh-sftp-server
-htop
-iptables-mod-tproxy
-kmod-sched-cake
-luci-app-adblock
-luci-app-openvpn
-vpn-policy-routing
-mwan3
-curl
-wget
-curl-ca-bundle
+# 存储管理
+luci-app-diskman               # 磁盘管理（已安装）
+luci-app-partexp               # 分区扩容（已安装）
+luci-app-mount                 # 挂载点（已安装）
+
+# 网络优化
+luci-app-turboacc              # Turbo ACC网络加速（已安装）
+luci-app-multiwan              # MultiWAN多拨（已安装）
+luci-app-wol                   # 网络唤醒
+luci-app-nft-qos               # 流量控制
+
+# DNS相关
+luci-app-adguardhome           # AdGuard Home（已安装）
+luci-app-smartdns              # SmartDNS（分流解析）
+
+# 防火墙和VPN
+luci-app-firewall              # 防火墙（已安装）
+luci-app-upnp                  # UPnP（已安装）
+luci-app-wireguard             # WireGuard（已安装）
+
+# 代理服务
+luci-app-passwall              # PassWall（已安装）
+luci-app-passwall2             # PassWall2（已安装）
+luci-app-bypass                # Bypass（已安装）
+luci-app-openclash             # OpenClash（已安装）
+
+# 容器化
+luci-app-docker                # Docker管理（已安装）
+luci-app-dockerman             # Docker图形管理（iStore相关）
+
+# 智能家居
+luci-app-homeassistant         # Home Assistant（已安装）
+
+# WiFi管理
+luci-app-wifidog               # WiFi认证（已安装）
+luci-app-wifi-schedule         # WiFi定时开关（已安装）
+luci-app-easymesh              # 易展Mesh支持
+luci-app-wireless              # 无线管理（基础）
+
+# 监控诊断
+luci-app-netdata               # 实时监控（已安装）
+luci-app-nlbwmon               # 流量监控
+luci-app-statistics            # 系统统计
+
+# 计划任务
+luci-app-cron                  # 计划任务（基础）
+luci-app-scheduled-tasks      # 计划任务助手（已安装）
+
+# 安装命令示例（保留作为参考）
+# opkg update
+# opkg install luci-app-sqm
+# opkg install luci-app-watchcat
+# opkg install luci-app-nft-qos
+
+# 家庭媒体中心参考
+# opkg install luci-app-minidlna
+# opkg install luci-app-transmission
+# opkg install luci-app-samba4
+
+# 其他系统工具参考
+# opkg install luci-app-ksmbd
+# opkg install luci-app-ttyd
+# opkg install luci-app-uhttpd
