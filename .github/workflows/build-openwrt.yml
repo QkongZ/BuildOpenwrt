@@ -37,7 +37,7 @@ jobs:
           fi
           echo "OPENWRT_TAG=${LATEST_TAG}" >> $GITHUB_OUTPUT
           echo "SKIP_BUILD=${SKIP}" >> $GITHUB_OUTPUT
-      - name: Debug: print computed outputs
+      - name: Debug print computed outputs
         run: |
           echo "Computed OPENWRT_TAG: ${{ steps.set.outputs.OPENWRT_TAG }}"
           echo "Computed SKIP_BUILD: ${{ steps.set.outputs.SKIP_BUILD }}"
@@ -88,7 +88,7 @@ jobs:
           mkdir -p artifacts/${{ matrix.arch }}
           ./scripts/build-openwrt.sh "${ARCH}" "${OPENWRT_TAG}" "artifacts/${{ matrix.arch }}"
       
-      - name: Debug: list artifacts before upload
+      - name: Debug list artifacts before upload
         run: |
           echo "List artifacts for arch=${{ matrix.arch }}:"
           ls -la artifacts/${{ matrix.arch }} || true
@@ -110,7 +110,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug: print tag and list workspace
+      - name: Debug print tag and list workspace
         run: |
           echo "RELEASE TAG from check-latest: ${{ needs.check-latest.outputs.OPENWRT_TAG }}"
           echo "Workspace contents:"
@@ -128,7 +128,7 @@ jobs:
           name: openwrt-aarch64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
           path: ./release_assets/aarch64 || true
 
-      - name: Debug: list release assets dirs
+      - name: Debug list release assets dirs
         run: |
           echo "x86_64 assets:"
           ls -la release_assets/x86_64 || true
