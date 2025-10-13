@@ -57,18 +57,13 @@ jobs:
       - name: "Determine architectures and produce JSON matrix"
         id: matrix
         run: |
-          # Use the workflow input (or default) to form a JSON array string output
           INPUT_ARCHS="${{ github.event.inputs.archs || 'x86_64' }}"
-          # Convert comma-separated to array elements, trim spaces
           IFS=',' read -ra ARRS <<< "$INPUT_ARCHS"
           JSON="["
           FIRST=true
           for a in "${ARRS[@]}"; do
-            # trim
             t="$(echo "$a" | xargs)"
-            if [ -z "$t" ]; then
-              continue
-            fi
+            [ -z "$t" ] && continue
             if [ "$FIRST" = true ]; then
               FIRST=false
             else
@@ -90,6 +85,7 @@ jobs:
       matrix:
         arch: ${{ fromJson(needs.prepare.outputs.ARCHS_JSON) }}
     env:
+      # set a job-level env default from check-latest outputs
       OPENWRT_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
       - name: Checkout repo
@@ -97,12 +93,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: "Debug env"
+      - name: "Debug env at start"
         run: |
-          echo "BUILD ARCH=${{ matrix.arch }}"
-          echo "OPENWRT_TAG=${{ env.OPENWRT_TAG }}"
-          uname -a
-          lsb_release -a || true
+          echo "Matrix arch=${{ matrix.arch }}"
+          echo "Needs OPENWRT_TAG (raw): '${{ needs.check-latest.outputs.OPENWRT_TAG }}'"
+          echo "Job env OPENWRT_TAG (initial): '${{ env.OPENWRT_TAG }}'"
+
+      - name: "Ensure OPENWRT_TAG is available to subsequent steps (write to GITHUB_ENV)"
+        run: |
+          # write the check-latest output explicitly into GITHUB_ENV so it's definitely
+          # available for actions/upload-artifact and later steps.
+          echo "OPENWRT_TAG=${{ needs.check-latest.outputs.OPENWRT_TAG }}" >> $GITHUB_ENV
+          # also create JOB_TAG as alias
+          echo "JOB_TAG=${{ needs.check-latest.outputs.OPENWRT_TAG }}" >> $GITHUB_ENV
+          echo "Wrote OPENWRT_TAG and JOB_TAG to GITHUB_ENV"
 
       - name: "Setup prerequisites (apt-get)"
         if: runner.os == 'Linux'
@@ -112,7 +116,6 @@ jobs:
             build-essential git subversion libncurses5-dev zlib1g-dev libssl-dev \
             python3 python3-pip rsync wget ccache jq ca-certificates bc xz-utils file apt-transport-https gnupg curl
           sudo apt-get update -y || true
-          # Try to install python3-distutils; fallbacks for runners with versioned packages
           if ! sudo apt-get install -y python3-distutils; then
             echo "python3-distutils not available, trying candidates..."
             sudo apt-get install -y python3.11-distutils python3.10-distutils || true
@@ -128,14 +131,14 @@ jobs:
       - name: "Run build script on runner"
         env:
           ARCH: ${{ matrix.arch }}
-          OPENWRT_TAG: ${{ env.OPENWRT_TAG }}
         run: |
-          echo "Run build for ARCH=${ARCH}, OPENWRT_TAG=${OPENWRT_TAG}"
+          echo "Run build for ARCH=${ARCH}, OPENWRT_TAG='${JOB_TAG:-}'"
           mkdir -p artifacts/${{ matrix.arch }}
-          ./scripts/build-openwrt.sh "${ARCH}" "${OPENWRT_TAG}" "artifacts/${{ matrix.arch }}"
+          ./scripts/build-openwrt.sh "${ARCH}" "${JOB_TAG:-}" "artifacts/${{ matrix.arch }}"
 
       - name: "Debug: list artifacts before upload"
         run: |
+          echo "JOB_TAG='${JOB_TAG:-}'"
           echo "List artifacts for arch=${{ matrix.arch }}:"
           ls -la artifacts/${{ matrix.arch }} || true
           find artifacts/${{ matrix.arch }} -maxdepth 3 -type f -print || true
@@ -143,13 +146,16 @@ jobs:
       - name: "Upload build artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-${{ matrix.arch }}-${{ env.OPENWRT_TAG }}
+          # use JOB_TAG env (set earlier via GITHUB_ENV)
+          name: openwrt-${{ matrix.arch }}-${{ env.JOB_TAG }}
           path: artifacts/${{ matrix.arch }}/*
 
   publish-release:
     needs: build
     runs-on: ubuntu-latest
     if: needs.check-latest.outputs.SKIP_BUILD != 'true'
+    env:
+      JOB_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -158,20 +164,20 @@ jobs:
 
       - name: "Debug: print tag and list workspace"
         run: |
-          echo "RELEASE TAG from check-latest: ${{ needs.check-latest.outputs.OPENWRT_TAG }}"
+          echo "RELEASE TAG from check-latest (JOB_TAG): '${{ env.JOB_TAG }}'"
           echo "Workspace contents:"
           ls -la || true
 
       - name: "Download artifacts (x86_64)"
         uses: actions/download-artifact@v4
         with:
-          name: openwrt-x86_64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          name: openwrt-x86_64-${{ env.JOB_TAG }}
           path: ./release_assets/x86_64 || true
 
       - name: "Download artifacts (aarch64)"
         uses: actions/download-artifact@v4
         with:
-          name: openwrt-aarch64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          name: openwrt-aarch64-${{ env.JOB_TAG }}
           path: ./release_assets/aarch64 || true
 
       - name: "Debug: list release assets dirs"
@@ -195,10 +201,10 @@ jobs:
         id: ghrel
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
-          name: OpenWrt ${{ needs.check-latest.outputs.OPENWRT_TAG }}
+          tag_name: ${{ env.JOB_TAG }}
+          name: OpenWrt ${{ env.JOB_TAG }}
           body: |
-            Automated OpenWrt builds for ${{ needs.check-latest.outputs.OPENWRT_TAG }}.
+            Automated OpenWrt builds for ${{ env.JOB_TAG }}.
             包含平台: x86_64, aarch64（按需添加）。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -212,7 +218,7 @@ jobs:
           for f in release_assets/x86_64/* || true; do
             [ -f "$f" ] || continue
             echo "Uploading $f"
-            gh release upload "${{ needs.check-latest.outputs.OPENWRT_TAG }}" "$f" --clobber
+            gh release upload "${{ env.JOB_TAG }}" "$f" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -222,7 +228,7 @@ jobs:
           for f in release_assets/aarch64/* || true; do
             [ -f "$f" ] || continue
             echo "Uploading $f"
-            gh release upload "${{ needs.check-latest.outputs.OPENWRT_TAG }}" "$f" --clobber
+            gh release upload "${{ env.JOB_TAG }}" "$f" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -232,9 +238,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          echo "${{ needs.check-latest.outputs.OPENWRT_TAG }}" > openwrt/LAST_OPENWRT_TAG
+          echo "${{ env.JOB_TAG }}" > openwrt/LAST_OPENWRT_TAG
           git add openwrt/LAST_OPENWRT_TAG || true
-          git commit -m "ci: update LAST_OPENWRT_TAG to ${{ needs.check-latest.outputs.OPENWRT_TAG }}" || echo "no change"
+          git commit -m "ci: update LAST_OPENWRT_TAG to ${{ env.JOB_TAG }}" || echo "no change"
           git push origin HEAD:main || echo "push failed"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
