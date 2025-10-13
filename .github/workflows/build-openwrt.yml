@@ -1,4 +1,4 @@
-# Triggers: push to main, manual, daily schedule (checks upstream OpenWrt release)
+# GitHub Actions workflow for building OpenWrt and publishing to Releases
 name: build-openwrt
 
 on:
@@ -6,6 +6,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      archs:
+        description: 'Comma-separated architectures to build (default: x86_64)'
+        required: false
+        default: 'x86_64'
   schedule:
     - cron: '0 2 * * *'
 
@@ -23,7 +28,6 @@ jobs:
           LATEST_TAG=$(curl -s "https://api.github.com/repos/openwrt/openwrt/releases" \
             | jq -r 'map(select(.prerelease==false)) | .[0].tag_name' 2>/dev/null || true)
           if [ -z "${LATEST_TAG}" ]; then
-            # fallback: common stable branch (adjust if needed)
             LATEST_TAG="openwrt-23.05"
           fi
           SKIP="false"
@@ -42,14 +46,29 @@ jobs:
           echo "Computed OPENWRT_TAG: ${{ steps.set.outputs.OPENWRT_TAG }}"
           echo "Computed SKIP_BUILD: ${{ steps.set.outputs.SKIP_BUILD }}"
 
-  build:
+  prepare:
     needs: check-latest
+    if: needs.check-latest.outputs.SKIP_BUILD != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      ARCH_MATRIX: ${{ steps.matrix.outputs.archs }}
+    steps:
+      - name: Determine architectures
+        id: matrix
+        run: |
+          INPUT_ARCHS="${{ github.event.inputs.archs || 'x86_64' }}"
+          # normalize comma-separated to space-separated
+          ARCHS=$(echo "${INPUT_ARCHS}" | tr ',' ' ' | tr -s ' ')
+          echo "archs=${ARCHS}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: [check-latest, prepare]
     if: needs.check-latest.outputs.SKIP_BUILD != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        arch: ${{ fromJson('["' + needs.prepare.outputs.ARCH_MATRIX | replace(' ', '","') + '"]') }}
     env:
       OPENWRT_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
@@ -62,16 +81,26 @@ jobs:
         run: |
           echo "BUILD ARCH=${{ matrix.arch }}"
           echo "OPENWRT_TAG=${{ env.OPENWRT_TAG }}"
-          ls -la || true
-
-      - name: Show workspace contents for debug
-        run: ls -la "${{ github.workspace }}" || true
+          uname -a
+          lsb_release -a || true
 
       - name: Setup prerequisites (apt-get)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential git subversion libncurses5-dev zlib1g-dev libssl-dev python3 python3-distutils rsync wget ccache jq ca-certificates bc xz-utils file
+          sudo apt-get update -y
+          # Try to install commonly required packages. For python3-distutils there
+          # are distribution-name differences: try generic name first, then fallbacks.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential git subversion libncurses5-dev zlib1g-dev libssl-dev \
+            python3 python3-pip rsync wget ccache jq ca-certificates bc xz-utils file apt-transport-https gnupg curl
+          sudo apt-get update -y || true
+          # Attempt python3-distutils; if not available, try a few likely alternatives.
+          if ! sudo apt-get install -y python3-distutils; then
+            echo "python3-distutils not available, trying versioned candidates..."
+            sudo apt-get install -y python3.11-distutils python3.10-distutils || true
+          fi
+          # Install setuptools if needed
+          sudo apt-get install -y python3-setuptools || true
           sudo apt-get clean
 
       - name: Ensure build scripts executable
@@ -87,7 +116,7 @@ jobs:
           echo "Run build for ARCH=${ARCH}, OPENWRT_TAG=${OPENWRT_TAG}"
           mkdir -p artifacts/${{ matrix.arch }}
           ./scripts/build-openwrt.sh "${ARCH}" "${OPENWRT_TAG}" "artifacts/${{ matrix.arch }}"
-      
+
       - name: Debug list artifacts before upload
         run: |
           echo "List artifacts for arch=${{ matrix.arch }}:"
@@ -144,6 +173,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y gh
+
       - name: Create or update GitHub Release
         id: ghrel
         uses: softprops/action-gh-release@v1
