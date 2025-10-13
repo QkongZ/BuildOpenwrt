@@ -1,4 +1,3 @@
-# GitHub Actions workflow for building OpenWrt and publishing to Releases
 # Triggers: push to main, manual, daily schedule (checks upstream OpenWrt release)
 name: build-openwrt
 
