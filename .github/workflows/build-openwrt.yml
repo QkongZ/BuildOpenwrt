@@ -21,7 +21,7 @@ jobs:
       OPENWRT_TAG: ${{ steps.set.outputs.OPENWRT_TAG }}
       SKIP_BUILD: ${{ steps.set.outputs.SKIP_BUILD }}
     steps:
-      - name: Determine latest OpenWrt tag
+      - name: "Determine latest OpenWrt tag"
         id: set
         run: |
           echo "GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME}"
@@ -41,7 +41,8 @@ jobs:
           fi
           echo "OPENWRT_TAG=${LATEST_TAG}" >> $GITHUB_OUTPUT
           echo "SKIP_BUILD=${SKIP}" >> $GITHUB_OUTPUT
-      - name: Debug print computed outputs
+
+      - name: "Debug: print computed outputs"
         run: |
           echo "Computed OPENWRT_TAG: ${{ steps.set.outputs.OPENWRT_TAG }}"
           echo "Computed SKIP_BUILD: ${{ steps.set.outputs.SKIP_BUILD }}"
@@ -51,15 +52,34 @@ jobs:
     if: needs.check-latest.outputs.SKIP_BUILD != 'true'
     runs-on: ubuntu-latest
     outputs:
-      ARCH_MATRIX: ${{ steps.matrix.outputs.archs }}
+      ARCHS_JSON: ${{ steps.matrix.outputs.ARCHS_JSON }}
     steps:
-      - name: Determine architectures
+      - name: "Determine architectures and produce JSON matrix"
         id: matrix
         run: |
+          # Use the workflow input (or default) to form a JSON array string output
           INPUT_ARCHS="${{ github.event.inputs.archs || 'x86_64' }}"
-          # normalize comma-separated to space-separated
-          ARCHS=$(echo "${INPUT_ARCHS}" | tr ',' ' ' | tr -s ' ')
-          echo "archs=${ARCHS}" >> $GITHUB_OUTPUT
+          # Convert comma-separated to array elements, trim spaces
+          IFS=',' read -ra ARRS <<< "$INPUT_ARCHS"
+          JSON="["
+          FIRST=true
+          for a in "${ARRS[@]}"; do
+            # trim
+            t="$(echo "$a" | xargs)"
+            if [ -z "$t" ]; then
+              continue
+            fi
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              JSON+=","
+            fi
+            JSON+="\"${t}\""
+          done
+          JSON+="]"
+          echo "ARCHS_JSON=$JSON" >> $GITHUB_OUTPUT
+          echo "Computed ARCHS_JSON=$JSON"
+        shell: bash
 
   build:
     needs: [check-latest, prepare]
@@ -68,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJson('["' + needs.prepare.outputs.ARCH_MATRIX | replace(' ', '","') + '"]') }}
+        arch: ${{ fromJson(needs.prepare.outputs.ARCHS_JSON) }}
     env:
       OPENWRT_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
@@ -77,38 +97,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug env
+      - name: "Debug env"
         run: |
           echo "BUILD ARCH=${{ matrix.arch }}"
           echo "OPENWRT_TAG=${{ env.OPENWRT_TAG }}"
           uname -a
           lsb_release -a || true
 
-      - name: Setup prerequisites (apt-get)
+      - name: "Setup prerequisites (apt-get)"
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          # Try to install commonly required packages. For python3-distutils there
-          # are distribution-name differences: try generic name first, then fallbacks.
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential git subversion libncurses5-dev zlib1g-dev libssl-dev \
             python3 python3-pip rsync wget ccache jq ca-certificates bc xz-utils file apt-transport-https gnupg curl
           sudo apt-get update -y || true
-          # Attempt python3-distutils; if not available, try a few likely alternatives.
+          # Try to install python3-distutils; fallbacks for runners with versioned packages
           if ! sudo apt-get install -y python3-distutils; then
-            echo "python3-distutils not available, trying versioned candidates..."
+            echo "python3-distutils not available, trying candidates..."
             sudo apt-get install -y python3.11-distutils python3.10-distutils || true
           fi
-          # Install setuptools if needed
           sudo apt-get install -y python3-setuptools || true
           sudo apt-get clean
 
-      - name: Ensure build scripts executable
+      - name: "Ensure build scripts executable"
         run: |
           chmod +x ./scripts/build-openwrt.sh || true
           chmod +x ./scripts/dockerize-rootfs.sh || true
 
-      - name: Run build script on runner
+      - name: "Run build script on runner"
         env:
           ARCH: ${{ matrix.arch }}
           OPENWRT_TAG: ${{ env.OPENWRT_TAG }}
@@ -117,13 +134,13 @@ jobs:
           mkdir -p artifacts/${{ matrix.arch }}
           ./scripts/build-openwrt.sh "${ARCH}" "${OPENWRT_TAG}" "artifacts/${{ matrix.arch }}"
 
-      - name: Debug list artifacts before upload
+      - name: "Debug: list artifacts before upload"
         run: |
           echo "List artifacts for arch=${{ matrix.arch }}:"
           ls -la artifacts/${{ matrix.arch }} || true
           find artifacts/${{ matrix.arch }} -maxdepth 3 -type f -print || true
 
-      - name: Upload build artifacts
+      - name: "Upload build artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-${{ matrix.arch }}-${{ env.OPENWRT_TAG }}
@@ -139,32 +156,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug print tag and list workspace
+      - name: "Debug: print tag and list workspace"
         run: |
           echo "RELEASE TAG from check-latest: ${{ needs.check-latest.outputs.OPENWRT_TAG }}"
           echo "Workspace contents:"
           ls -la || true
 
-      - name: Download artifacts (x86_64)
+      - name: "Download artifacts (x86_64)"
         uses: actions/download-artifact@v4
         with:
           name: openwrt-x86_64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
           path: ./release_assets/x86_64 || true
 
-      - name: Download artifacts (aarch64)
+      - name: "Download artifacts (aarch64)"
         uses: actions/download-artifact@v4
         with:
           name: openwrt-aarch64-${{ needs.check-latest.outputs.OPENWRT_TAG }}
           path: ./release_assets/aarch64 || true
 
-      - name: Debug list release assets dirs
+      - name: "Debug: list release assets dirs"
         run: |
           echo "x86_64 assets:"
           ls -la release_assets/x86_64 || true
           echo "aarch64 assets:"
           ls -la release_assets/aarch64 || true
 
-      - name: Install gh (GitHub CLI)
+      - name: "Install gh (GitHub CLI)"
         run: |
           sudo apt-get update
           sudo apt-get install -y curl gnupg
@@ -174,7 +191,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gh
 
-      - name: Create or update GitHub Release
+      - name: "Create or update GitHub Release"
         id: ghrel
         uses: softprops/action-gh-release@v1
         with:
@@ -186,11 +203,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Authenticate gh with token
+      - name: "Authenticate gh with token"
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
-      - name: Upload release assets (x86_64)
+      - name: "Upload release assets (x86_64)"
         run: |
           for f in release_assets/x86_64/* || true; do
             [ -f "$f" ] || continue
@@ -200,7 +217,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload release assets (aarch64)
+      - name: "Upload release assets (aarch64)"
         run: |
           for f in release_assets/aarch64/* || true; do
             [ -f "$f" ] || continue
@@ -210,7 +227,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Save latest tag (on schedule)
+      - name: "Save latest tag (on schedule)"
         if: ${{ github.event_name == 'schedule' }}
         run: |
           git config user.name "github-actions[bot]"
