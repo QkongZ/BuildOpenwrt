@@ -157,6 +157,11 @@ jobs:
     env:
       JOB_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
+
+      - name: "Restore JOB_TAG from needs"
+        run: |
+          echo "JOB_TAG=${{ needs.check-latest.outputs.OPENWRT_TAG }}" >> $GITHUB_ENV
+
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
