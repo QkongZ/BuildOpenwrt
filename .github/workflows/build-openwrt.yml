@@ -151,16 +151,14 @@ jobs:
           path: artifacts/${{ matrix.arch }}/*
 
   publish-release:
-    needs: build
+    needs: [check-latest, build]  # 关键修改：添加对 check-latest 的依赖
     runs-on: ubuntu-latest
     if: needs.check-latest.outputs.SKIP_BUILD != 'true'
-    env:
-      JOB_TAG: ${{ needs.check-latest.outputs.OPENWRT_TAG }}
     steps:
-
-      - name: "Restore JOB_TAG from needs"
+      - name: "Set JOB_TAG from check-latest"
         run: |
           echo "JOB_TAG=${{ needs.check-latest.outputs.OPENWRT_TAG }}" >> $GITHUB_ENV
+          echo "Set JOB_TAG to: ${{ needs.check-latest.outputs.OPENWRT_TAG }}"
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -169,7 +167,7 @@ jobs:
 
       - name: "Debug: print tag and list workspace"
         run: |
-          echo "RELEASE TAG from check-latest (JOB_TAG): '${{ env.JOB_TAG }}'"
+          echo "RELEASE TAG from check-latest (JOB_TAG): '${JOB_TAG}'"
           echo "Workspace contents:"
           ls -la || true
 
@@ -177,13 +175,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: openwrt-x86_64-${{ env.JOB_TAG }}
-          path: ./release_assets/x86_64 || true
+          path: ./release_assets/x86_64
 
       - name: "Download artifacts (aarch64)"
         uses: actions/download-artifact@v4
         with:
           name: openwrt-aarch64-${{ env.JOB_TAG }}
-          path: ./release_assets/aarch64 || true
+          path: ./release_assets/aarch64
 
       - name: "Debug: list release assets dirs"
         run: |
@@ -220,7 +218,7 @@ jobs:
 
       - name: "Upload release assets (x86_64)"
         run: |
-          for f in release_assets/x86_64/* || true; do
+          for f in release_assets/x86_64/*; do
             [ -f "$f" ] || continue
             echo "Uploading $f"
             gh release upload "${{ env.JOB_TAG }}" "$f" --clobber
@@ -230,7 +228,7 @@ jobs:
 
       - name: "Upload release assets (aarch64)"
         run: |
-          for f in release_assets/aarch64/* || true; do
+          for f in release_assets/aarch64/*; do
             [ -f "$f" ] || continue
             echo "Uploading $f"
             gh release upload "${{ env.JOB_TAG }}" "$f" --clobber
@@ -244,7 +242,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           echo "${{ env.JOB_TAG }}" > openwrt/LAST_OPENWRT_TAG
-          git add openwrt/LAST_OPENWRT_TAG || true
+          git add openwrt/LAST_OPENWRT_TAG
           git commit -m "ci: update LAST_OPENWRT_TAG to ${{ env.JOB_TAG }}" || echo "no change"
           git push origin HEAD:main || echo "push failed"
         env:
