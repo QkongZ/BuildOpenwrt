@@ -178,11 +178,11 @@ jobs:
           name: openwrt-x86_64-${{ env.JOB_TAG }}
           path: ./release_assets/x86_64
 
-      - name: "Download artifacts (aarch64)"
-        uses: actions/download-artifact@v4
-        with:
-          name: openwrt-aarch64-${{ env.JOB_TAG }}
-          path: ./release_assets/aarch64
+      #- name: "Download artifacts (aarch64)"
+       # uses: actions/download-artifact@v4
+       # with:
+         # name: openwrt-aarch64-${{ env.JOB_TAG }}
+         # path: ./release_assets/aarch64
 
       - name: "Debug: list release assets dirs"
         run: |
