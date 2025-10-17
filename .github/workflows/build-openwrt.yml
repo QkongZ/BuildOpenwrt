@@ -76,6 +76,14 @@ jobs:
           echo "ARCHS_JSON=$JSON" >> $GITHUB_OUTPUT
           echo "Computed ARCHS_JSON=$JSON"
         shell: bash
+      - name: "Initialize OpenWrt feeds"
+        run: |
+          cd openwrt
+          # 重试更新 feeds
+          for i in {1..3}; do
+            ./scripts/feeds update -a && break || echo "Feeds update attempt $i failed, retrying..." && sleep 10
+          done
+          ./scripts/feeds install -a
 
   build:
     needs: [check-latest, prepare]
