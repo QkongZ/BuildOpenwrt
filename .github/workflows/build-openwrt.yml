@@ -1,38 +1,31 @@
 #
-# OpenWrt 自动编译工作流
-# 适配机型: x86_64 (J4125 PVE)
+# OpenWrt 自动编译工作流 (Fixed)
+# 适配机型: x86_64 (J4125 PVE) + AX210
 #
 name: Build OpenWrt for J4125
 
 on:
-  # 1. 仓库默认分支(main)有代码推送时触发 (比如您修改了配置文件)
   push:
     branches:
       - main
     paths:
       - 'configs/**'
       - 'scripts/**'
+      - 'files/**'
       - '.github/workflows/**'
-
-  # 2. 定时触发: 北京时间每周五下午4点 (UTC时间 8:00)
   schedule:
     - cron: 0 8 * * 5
-
-  # 3. 手动触发按钮 (可以在 Actions 页面手动点击)
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: '是否开启 SSH 连接进行调试 (true/false)'
-        required: false
-        default: 'false'
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt
-  REPO_BRANCH: master  # 使用官方源码 master 分支以获取最新内核支持 AX210
+  REPO_BRANCH: master
   FEEDS_CONF: scripts/feeds.sh
   CONFIG_FILE: configs/x86_64.config
   DIY_P1_SH: scripts/feeds.sh
   DIY_P2_SH: scripts/customize.sh
+  # 指向仓库根目录下的 files 文件夹
+  CUSTOM_FILES: files
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
@@ -52,7 +45,8 @@ jobs:
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkg-conf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        # 修复了依赖列表: 移除了 pkg-conf, python2.7 (22.04默认无), 增加了 pkg-config
+        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkg-config python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -66,7 +60,7 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 加载自定义 Feeds (插件源)
+    - name: 加载自定义 Feeds
       run: |
         chmod +x $DIY_P1_SH
         cd openwrt
@@ -78,17 +72,27 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 加载自定义配置 (System Settings)
+    - name: 加载自定义配置 (Custom Settings)
       run: |
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    - name: 注入自定义文件 (files)
+      run: |
+        # 如果仓库里存在 files 目录，则复制到 openwrt/files
+        if [ -d "$GITHUB_WORKSPACE/$CUSTOM_FILES" ]; then
+          echo "Found custom files directory, copying..."
+          cp -r $GITHUB_WORKSPACE/$CUSTOM_FILES openwrt/files
+          chmod -R 755 openwrt/files
+        else
+          echo "No custom files directory found."
+        fi
+
     - name: 加载 Config 配置文件
       run: |
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         cd openwrt
-        # 自动补全依赖
         make defconfig
 
     - name: 下载软件包
@@ -116,7 +120,6 @@ jobs:
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
-        # 如果需要 rootfs.tar.gz 给 docker 用，保留它
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -127,7 +130,7 @@ jobs:
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
         echo "OpenWrt J4125 Firmware" >> release.txt
-        echo "Built from official source on $(date)" >> release.txt
+        echo "Default IP: 192.168.0.250" >> release.txt
 
     - name: 发布 Firmware 到 Releases
       uses: softprops/action-gh-release@v1
