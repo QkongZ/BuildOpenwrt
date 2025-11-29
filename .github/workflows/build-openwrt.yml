@@ -1,6 +1,7 @@
 #
-# OpenWrt 自动编译工作流 (Permission Fixed)
+# OpenWrt 自动编译工作流 (Final Fix)
 # 适配机型: x86_64 (J4125 PVE) + AX210
+# 修复内容: 权限问题 + Windows换行符问题
 #
 name: Build OpenWrt for J4125
 
@@ -42,23 +43,23 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 1. 清理空间
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        
-        # 2. 安装依赖
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkg-config python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        
-        # 3. 清理无用包
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
-        
-        # 4. 设置时区
         sudo timedatectl set-timezone "$TZ"
-        
-        # 5. [关键修复] 使用 sudo 创建目录，然后更改所有权
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+
+    - name: 修复脚本格式 (Windows to Unix)
+      run: |
+        # 这一步专门修复 Windows 换行符问题
+        # 查找所有 .sh 和 .config 文件，移除回车符 (\r)
+        find scripts -name "*.sh" -exec sed -i 's/\r$//' {} +
+        find configs -name "*.config" -exec sed -i 's/\r$//' {} +
+        # 确保脚本有执行权限
+        chmod +x scripts/*.sh
 
     - name: 克隆 OpenWrt 源码
       working-directory: /workdir
@@ -69,7 +70,6 @@ jobs:
 
     - name: 加载自定义 Feeds
       run: |
-        chmod +x $DIY_P1_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
 
@@ -81,7 +81,6 @@ jobs:
 
     - name: 加载自定义配置 (Custom Settings)
       run: |
-        chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
@@ -89,7 +88,6 @@ jobs:
       run: |
         if [ -d "$GITHUB_WORKSPACE/$CUSTOM_FILES" ]; then
           echo "Found custom files directory, copying..."
-          # 确保目标目录存在
           mkdir -p openwrt/files
           cp -r $GITHUB_WORKSPACE/$CUSTOM_FILES/* openwrt/files/
           chmod -R 755 openwrt/files
